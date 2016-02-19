@@ -19,13 +19,14 @@ Elasticsearch.
 """
 import base64
 import logging
+import warnings
 
 from threading import Timer
 
 import bson.json_util
 
 from elasticsearch import Elasticsearch, exceptions as es_exceptions
-from elasticsearch.helpers import scan, streaming_bulk
+from elasticsearch.helpers import bulk, scan, streaming_bulk
 
 from mongo_connector import errors
 from mongo_connector.compat import u
@@ -108,8 +109,20 @@ class DocManager(DocManagerBase):
         if doc.get('drop'):
             db, coll = self.command_helper.map_collection(db, doc['drop'])
             if db and coll:
-                self.elastic.indices.delete_mapping(index=db.lower(),
-                                                    doc_type=coll)
+                # This will delete the items in coll, but not get rid of the
+                # mapping.
+                warnings.warn("Attempting to drop collection %s.%s. "
+                              "The collection will be empty but cannot be fully"
+                              " deleted" % (coll, db))
+                bulk_deletes = []
+                for result in scan(self.elastic,
+                                   index=db.lower(),
+                                   doc_type=coll):
+                    result['_op_type'] = 'delete'
+                    bulk_deletes.append(result)
+                bulk(self.elastic, bulk_deletes)
+
+
 
     @wrap_exceptions
     def update(self, document_id, update_spec, namespace, timestamp):
