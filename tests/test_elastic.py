@@ -213,12 +213,16 @@ class TestElastic(ElasticsearchTestCase):
         """
         primary_conn = self.repl_set.primary.client()
 
+        # This doc can be picked up in the collection dump
         self.conn['test']['test'].insert_one({'name': 'paul'})
         condition1 = lambda: self.conn['test']['test'].find(
             {'name': 'paul'}).count() == 1
         condition2 = lambda: self._count() == 1
         assert_soon(condition1)
         assert_soon(condition2)
+
+        # This doc is definitely not picked up by collection dump
+        self.conn['test']['test'].insert_one({'name': 'pauly'})
 
         self.repl_set.primary.stop(destroy=False)
 
@@ -229,10 +233,10 @@ class TestElastic(ElasticsearchTestCase):
         time.sleep(5)
         retry_until_ok(self.conn.test.test.insert_one,
                        {'name': 'pauline'})
-        assert_soon(lambda: self._count() == 2)
+        assert_soon(lambda: self._count() == 3)
         result_set_1 = list(self._search())
         result_set_2 = self.conn['test']['test'].find_one({'name': 'pauline'})
-        self.assertEqual(len(result_set_1), 2)
+        self.assertEqual(len(result_set_1), 3)
         #make sure pauline is there
         for item in result_set_1:
             if item['name'] == 'pauline':
@@ -247,12 +251,17 @@ class TestElastic(ElasticsearchTestCase):
 
         time.sleep(2)
         result_set_1 = list(self._search())
-        self.assertEqual(len(result_set_1), 1)
+        self.assertEqual(len(result_set_1), 2)
 
-        for item in result_set_1:
-            self.assertEqual(item['name'], 'paul')
+        if result_set_1[0]['name'] == 'paul':
+            self.assertEqual(result_set_1[1]['name'], 'pauly')
+        elif result_set_1[0]['name'] == 'pauly':
+            self.assertEqual(result_set_1[1]['name'], 'paul')
+        else:
+            self.assertTrue(0, 'Unknown document retrieved')
+
         find_cursor = retry_until_ok(self.conn['test']['test'].find)
-        self.assertEqual(retry_until_ok(find_cursor.count), 1)
+        self.assertEqual(retry_until_ok(find_cursor.count), 2)
 
     def test_bad_int_value(self):
         self.conn.test.test.insert_one({
